@@ -38,7 +38,6 @@ defmodule Example do
 
     Tucan.scatter(data, "x", "y", color_by: "cluster", shape_by: "cluster", point_size: 100)
     |> Tucan.Export.save!("kmeans_plot.png", scale: 2)
-
   end
 
   def euclidean_distance(v1, v2) do
