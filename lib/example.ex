@@ -3,12 +3,12 @@ defmodule Example do
   alias VegaLite
   alias Tucan
 
-  @tolerance 2
+  @tolerance 0.001
   @epsilon 1.0e-9
   @num_of_points_in_cluster 50
   @num_of_clusters 4
-  @random_restarts 20
-  @spread 0.5
+  @random_restarts 5
+  @spread 0.8
 
 
 
@@ -24,21 +24,40 @@ defmodule Example do
     cluster_4 = generate_cluster([0, 1], @num_of_points_in_cluster)
 
     points = cluster_1 ++ cluster_2 ++ cluster_3 ++ cluster_4
+    # Make sure the frames directory exists
+    File.mkdir_p!("frames")
 
-    {assignments, _, _} = k_means(points, @num_of_clusters, @random_restarts)
-    data =
-      Enum.zip(points, assignments)
-      |> Enum.map(fn {[x, y], cluster} ->
-        %{
-          "x" => x,
-          "y" => y,
-          "cluster" => "cluster_#{cluster}"
-        }
-      end)
+    Path.wildcard("frames/restart_*.png")
+    |> Enum.each(&File.rm!/1)
+
+    # Run k-means
+    k_means(points, @num_of_clusters, @random_restarts)
+
+    # Create a gif from the generated images using
+    files = Path.wildcard("frames/restart_*.png")
+
+    if System.find_executable("convert") do
+      System.cmd("convert", ["-delay", "20", "-loop", "0"] ++ files ++ ["kmeans.gif"])
+    else
+      IO.puts("'convert' not found")
+    end
+  end
+
+  def generate_image(points, assignments, restart, iter) do
+    data = Enum.zip(points, assignments)
+    |> Enum.map(fn {[x, y], cluster} ->
+      %{
+        "x" => x,
+        "y" => y,
+        "cluster" => "cluster_#{cluster}"
+      }
+    end)
 
     Tucan.scatter(data, "x", "y", color_by: "cluster", shape_by: "cluster", point_size: 100)
-    |> Tucan.Export.save!("kmeans_plot.png", scale: 2)
+    |> Tucan.Export.save!("frames/restart_#{restart}_iter_#{iter}.png", scale: 2)
   end
+
+
 
   def euclidean_distance(v1, v2) do
     Enum.reduce(Enum.zip(v1, v2), 0, fn {x1, x2}, acc -> acc + :math.pow(x1 - x2, 2) end)
@@ -94,22 +113,26 @@ defmodule Example do
     Enum.map(correct_order_clusters, fn cluster_points -> recalculate_centroid(cluster_points) end)
   end
 
-  def k_means_loop(points, centroids) do
+  def k_means_loop(points, centroids, restart_number, iter \\ 0) do
     assignments = assign_to_cluster_all(points, centroids)
     new_centroids = recalculate_centroid_all(points, assignments)
+
+    # Generate the image for this iteration
+    generate_image(points, assignments, restart_number, iter)
+
     if break_condition(centroids, new_centroids) do
       {assignments, new_centroids}
     else
-      k_means_loop(points, new_centroids)
+      k_means_loop(points, new_centroids, restart_number, iter + 1)
     end
   end
 
   def k_means(points, k, restarts) do
-    Enum.map(1..restarts, fn _ ->
+    Enum.map(1..restarts, fn r ->
       # Generate random centroids from points
       centroids = Enum.map(1..k, fn _ -> Enum.random(points) end)
       # Run the k-means loop
-      {assignment, new_centroids} = k_means_loop(points, centroids)
+      {assignment, new_centroids} = k_means_loop(points, centroids, r)
       # Calculate the total variance by cluster
       clusters = Enum.group_by(Enum.zip(points, assignment), fn {_point, assignment} -> assignment end, fn {point, _assignment} -> point end)
       variances = Enum.map(0..(map_size(clusters)-1), fn i -> variance(Map.get(clusters, i, []), Enum.at(new_centroids, i)) end)
